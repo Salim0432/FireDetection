@@ -10,7 +10,7 @@
 Ce dépôt contient l'implémentation complète du **Module 1 : Vision par Ordinateur (CNN / U-Net)** ainsi que le **Support Data** pour l'architecture multi-agents de surveillance et de confinement autonome des feux de forêt (**Projet 5**) :
 
 1. **👤 Agent 1 — Salim (Vision par Ordinateur - CNN / U-Net)** : Détection binaire de la présence du feu (`Oui`/`Non`) et segmentation spatiale pixel par pixel de la zone touchée sur imagerie satellite/aérienne.
-2. **👤 Agent 2 — Mondir (Modélisation Temporelle & Météo - RNN/LSTM)** : Prédiction de la vitesse et de la direction de propagation selon la localisation extraite par le CNN, le vent et l'humidité.
+2. **👤 Agent 2 — Muondir (Modélisation Temporelle & Météo - RNN/LSTM)** : Prédiction de la vitesse et de la direction de propagation selon la localisation extraite par le CNN, le vent et l'humidité.
 3. **👤 Agent 3 — Système d'Alerte & Intégration (Arbre de Décision & Streamlit)** : Fusion des prédictions CNN + LSTM + météo pour déclencher les paliers d'alerte (`Vert`, `Orange`, `Rouge`, `Évacuation`).
 
 ---
