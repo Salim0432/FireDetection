@@ -5,7 +5,7 @@ Responsable : Salim (Vision par Ordinateur - CNN / U-Net)
 
 Ce module fournit la fonction officielle `predict(image_path)` exigée par le cahier
 des charges pour l'intégration avec :
-- Mondir (Modèle RNN/LSTM `predict_propagation(location, wind, humidity)`)
+- Moundir (Modèle RNN/LSTM `predict_propagation(location, wind, humidity)`)
 - Responsable Système d'Alerte (Arbre de Décision + `main.py` + Streamlit)
 
 Sortie de `predict(image_path)` :

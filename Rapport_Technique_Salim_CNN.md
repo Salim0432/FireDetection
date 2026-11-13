@@ -47,7 +47,7 @@ Conformément au cahier des charges, le modèle entraîné est sauvegardé sous 
 - **`models/fire_cnn_unet.h5`** : Conteneur hiérarchique **HDF5** (`h5py`) compressé contenant les tenseurs de poids et les métadonnées JSON.
 
 ### Interface d'intégration pour l'équipe
-La fonction `predict(image_path)` dans `predict.py` prend en entrée le chemin d'une image satellite et retourne un dictionnaire directement exploitable par le modèle **LSTM de Mondir** et l'**Arbre de Décision** dans `main.py` :
+La fonction `predict(image_path)` dans `predict.py` prend en entrée le chemin d'une image satellite et retourne un dictionnaire directement exploitable par le modèle **LSTM de Moundir** et l'**Arbre de Décision** dans `main.py` :
 
 ```python
 from predict import predict
@@ -74,7 +74,7 @@ resultat = predict("chemin/vers/image_satellite.png")
 ---
 
 ## 5. Mission Secondaire : Support Data (`data_support.py`)
-Afin de faciliter le travail de **Mondir (RNN/LSTM)** et du **Responsable Système d'Alerte (Arbre de Décision)**, le script `data_support.py` génère le dataset unifié `dataset/global_fire_weather_dataset.csv` (200 échantillons synchronisés) associant :
+Afin de faciliter le travail de **Moundir (RNN/LSTM)** et du **Responsable Système d'Alerte (Arbre de Décision)**, le script `data_support.py` génère le dataset unifié `dataset/global_fire_weather_dataset.csv` (200 échantillons synchronisés) associant :
 - Les sorties du CNN (`fire_detected`, `confidence`, `location_zone`, `latitude`, `longitude`, `affected_area_pct`),
 - Les relevés météorologiques (`temperature_c`, `humidity_pct`, `wind_speed_kmh`, `wind_direction`),
 - Les cibles de propagation (`propagation_direction`, `propagation_speed_kmh`),

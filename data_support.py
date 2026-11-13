@@ -11,7 +11,7 @@ Ce module remplit deux rôles clés pour le Projet 5 :
      copié dans `dataset/forestfires_kaggle.csv`.
 2. Mission Secondaire (Support Data) : Génération et exportation du dataset global unifié
    (`dataset/global_fire_weather_dataset.csv`) fusionnant les prédictions CNN de Salim
-   avec les vraies données météo (vent, humidité, température) pour Mondir (LSTM) et
+   avec les vraies données météo (vent, humidité, température) pour Moundir (LSTM) et
    l'Arbre de Décision (`main.py` / Streamlit).
 """
 
@@ -291,7 +291,7 @@ def build_global_team_dataset(
     Génère le dataset global unifié combinant :
     - Les sorties Vision par Ordinateur de Salim (Feu Oui/Non, zone localisée, GPS, % surface brûlée)
     - Les vraies mesures météorologiques issues de `dataset/forestfires_kaggle.csv` (vent, humidité RH,
-      température, indices FFMC/DMC/ISI) pour Mondir (LSTM) et l'Arbre de Décision.
+      température, indices FFMC/DMC/ISI) pour Moundir (LSTM) et l'Arbre de Décision.
     """
     from predict import predict
 
@@ -318,12 +318,12 @@ def build_global_team_dataset(
         "latitude",                # Sortie Salim (GPS lat)
         "longitude",               # Sortie Salim (GPS lon)
         "affected_area_pct",       # Sortie Salim (% surface touchée)
-        "temperature_c",           # Entrée Météo Kaggle (Mondir & Arbre de Décision)
-        "humidity_pct",            # Entrée Météo Kaggle RH (Mondir & Arbre de Décision)
-        "wind_speed_kmh",          # Entrée Météo Kaggle wind (Mondir & Arbre de Décision)
-        "wind_direction",          # Entrée Météo (Mondir)
-        "propagation_direction",   # Cible Mondir (LSTM)
-        "propagation_speed_kmh",   # Cible Mondir (LSTM)
+        "temperature_c",           # Entrée Météo Kaggle (Moundir & Arbre de Décision)
+        "humidity_pct",            # Entrée Météo Kaggle RH (Moundir & Arbre de Décision)
+        "wind_speed_kmh",          # Entrée Météo Kaggle wind (Moundir & Arbre de Décision)
+        "wind_direction",          # Entrée Météo (Moundir)
+        "propagation_direction",   # Cible Moundir (LSTM)
+        "propagation_speed_kmh",   # Cible Moundir (LSTM)
         "towards_populated_zone",  # Entrée Arbre de Décision ("Oui" / "Non")
         "alert_level",             # Cible Arbre de Décision ("Vert", "Orange", "Rouge", "Évacuation")
     ]

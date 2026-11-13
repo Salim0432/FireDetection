@@ -6,7 +6,7 @@ Exécute de bout en bout les Tâches 1, 2, 3 et la Mission Secondaire de Salim :
 2. Tâche 2 : Entraînement du modèle CNN U-Net (`FireUNet`) pour la détection et
    la segmentation de la zone touchée.
 3. Tâche 3 : Sauvegarde du modèle final (`.pkl` et `.h5`) et test de `predict(image_path)`.
-4. Mission Secondaire : Génération du dataset global synchronisé pour Mondir (LSTM)
+4. Mission Secondaire : Génération du dataset global synchronisé pour Moundir (LSTM)
    et le Système d'Alerte (Arbre de Décision).
 """
 
@@ -87,7 +87,7 @@ def main() -> None:
     print("  Confiance   :", res_nofire["confidence"])
     print("  Localisation:", res_nofire["location"])
 
-    # 4. Mission Secondaire : Support Data pour Mondir & Arbre de Décision
+    # 4. Mission Secondaire : Support Data pour Moundir & Arbre de Décision
     print("\n[Étape 4/4] Génération du dataset global pour l'équipe (Support Data)...")
     all_samples = val_samples + train_samples
     build_global_team_dataset(
