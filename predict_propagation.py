@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch
 
+from contracts import validate_lstm_output
 from model_lstm import FirePropagationLSTM, load_lstm_model
 from temporal_preprocessing import (
     CARDINAL_8_SECTORS,
@@ -205,33 +206,51 @@ def predict_propagation(
     seq_len = int(_CACHED_LSTM_PAYLOAD["config"].get("sequence_length", 4))
     sequence_features: List[List[float]] = []
 
-    # Si un historique réel est fourni, on l'utilise, sinon on modélise l'inertie
-    # sur les pas temporels précédents t-3, t-2, t-1, t
-    for step_back in range(seq_len - 1, -1, -1):
-        dt_factor = 1.0 - (step_back * 0.08)
-        past_temp = temp_c - (step_back * 0.4)
-        past_rh = min(100.0, rh_pct + (step_back * 1.5))
-        past_wind = max(5.0, wind_speed * dt_factor)
-        past_dir_deg = (wind_deg + (step_back * 2.0)) % 360.0
+    # Si un historique réel est fourni, on l'utilise (complété à gauche si < seq_len),
+    # sinon on modélise l'inertie physique sur les pas temporels t-3, t-2, t-1, t
+    if historical_observations:
+        obs_list = list(historical_observations)[-seq_len:]
+        while len(obs_list) < seq_len:
+            obs_list.insert(0, obs_list[0])
+        for obs in obs_list:
+            obs_temp = float(obs.get("temperature_c", obs.get("temperature", temp_c)))
+            obs_rh = float(np.clip(obs.get("humidity_pct", obs.get("humidity", rh_pct)), 5.0, 100.0))
+            obs_wind = max(0.0, float(obs.get("wind_speed_kmh", obs.get("wind_speed", wind_speed))))
+            obs_dir = direction_to_angle(obs.get("wind_direction", obs.get("direction", wind_deg)))
+            w_sin, w_cos = angle_to_sin_cos(obs_dir)
+            fwi = compute_fire_weather_index(obs_temp, obs_rh, obs_wind)
+            obs_area = max(0.1, float(obs.get("affected_area_pct", affected_area)))
+            default_hist_speed = max(0.2, (obs_wind * 0.08) * (1.0 + (50.0 - obs_rh) / 60.0))
+            obs_speed = max(0.1, float(obs.get("historical_speed_kmh", obs.get("speed", default_hist_speed))))
+            sequence_features.append(
+                [obs_temp, obs_rh, obs_wind, w_sin, w_cos, fwi, obs_area, norm_x, norm_y, obs_speed]
+            )
+    else:
+        for step_back in range(seq_len - 1, -1, -1):
+            dt_factor = 1.0 - (step_back * 0.08)
+            past_temp = temp_c - (step_back * 0.4)
+            past_rh = min(100.0, rh_pct + (step_back * 1.5))
+            past_wind = max(5.0, wind_speed * dt_factor)
+            past_dir_deg = (wind_deg + (step_back * 2.0)) % 360.0
 
-        w_sin, w_cos = angle_to_sin_cos(past_dir_deg)
-        fwi = compute_fire_weather_index(past_temp, past_rh, past_wind)
-        hist_area = max(0.5, affected_area * (0.85 ** step_back))
-        hist_speed = max(0.2, (past_wind * 0.08) * (1.0 + (50.0 - past_rh) / 60.0))
+            w_sin, w_cos = angle_to_sin_cos(past_dir_deg)
+            fwi = compute_fire_weather_index(past_temp, past_rh, past_wind)
+            hist_area = max(0.5, affected_area * (0.85 ** step_back))
+            hist_speed = max(0.2, (past_wind * 0.08) * (1.0 + (50.0 - past_rh) / 60.0))
 
-        feat_vector = [
-            past_temp,
-            past_rh,
-            past_wind,
-            w_sin,
-            w_cos,
-            fwi,
-            hist_area,
-            norm_x,
-            norm_y,
-            hist_speed,
-        ]
-        sequence_features.append(feat_vector)
+            feat_vector = [
+                past_temp,
+                past_rh,
+                past_wind,
+                w_sin,
+                w_cos,
+                fwi,
+                hist_area,
+                norm_x,
+                norm_y,
+                hist_speed,
+            ]
+            sequence_features.append(feat_vector)
 
     # 3. Standardisation et inférence PyTorch
     x_raw = np.array([sequence_features], dtype=np.float32)  # shape (1, seq_len, n_features)
@@ -304,7 +323,7 @@ def predict_propagation(
         "summary": summary_text,
     }
 
-    return result
+    return validate_lstm_output(result)
 
 
 if __name__ == "__main__":

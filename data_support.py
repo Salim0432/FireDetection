@@ -293,7 +293,9 @@ def build_global_team_dataset(
     - Les vraies mesures météorologiques issues de `dataset/forestfires_kaggle.csv` (vent, humidité RH,
       température, indices FFMC/DMC/ISI) pour Moundir (LSTM) et l'Arbre de Décision.
     """
+    from contracts import ALERT_CODE_TO_LABEL, compute_reference_alert_code
     from predict import predict
+    from predict_propagation import predict_propagation
 
     out_path = Path(output_csv)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -350,27 +352,43 @@ def build_global_team_dataset(
                 raw_wind = float(rng.uniform(15.0, 60.0))
 
             if has_fire:
-                temp_c = round(max(26.0, raw_temp), 1)
-                humidity = round(min(50.0, raw_rh), 1)
-                wind_kmh = round(max(14.0, raw_wind), 1)
+                # Distribution variée couvrant tous les paliers d'alerte (Orange, Rouge, Évacuation)
+                regime = idx % 5
+                if regime == 0:
+                    # Feu modéré : vent faible (< 20 km/h) et humidité élevée (> 40%) -> Orange
+                    temp_c = round(float(rng.uniform(20.0, 27.0)), 1)
+                    humidity = round(float(rng.uniform(43.0, 68.0)), 1)
+                    wind_kmh = round(float(rng.uniform(6.0, 18.5)), 1)
+                    eff_loc = dict(loc)
+                    eff_loc["affected_area_pct"] = min(float(loc["affected_area_pct"]), 8.5)
+                else:
+                    temp_c = round(max(24.0, raw_temp), 1)
+                    humidity = round(min(55.0, raw_rh), 1)
+                    wind_kmh = round(max(14.0, raw_wind), 1)
+                    eff_loc = loc
+
                 wind_dir = str(rng.choice(cardinal_directions))
-                prop_dir = wind_dir
-                prop_speed = round(
-                    max(0.4, (0.08 * wind_kmh) * (1.0 + (45.0 - humidity) / 60.0) * (1.0 + loc["affected_area_pct"] / 40.0)),
-                    2,
+                lstm_res = predict_propagation(
+                    location=eff_loc,
+                    wind={"speed": wind_kmh, "direction": wind_dir},
+                    humidity=humidity,
+                    temperature=temp_c,
                 )
+                prop_dir = lstm_res["propagation_direction"]
+                prop_speed = lstm_res["propagation_speed"]
                 near_hab = "Oui" if rng.random() < 0.45 else "Non"
 
-                if near_hab == "Oui" and (wind_kmh >= 38.0 or loc["affected_area_pct"] >= 8.0 or humidity <= 25.0):
-                    alert = "Évacuation"
-                elif near_hab == "Oui" or wind_kmh >= 32.0 or loc["affected_area_pct"] >= 5.0:
-                    alert = "Rouge"
-                else:
-                    alert = "Orange"
+                alert_code = compute_reference_alert_code(
+                    feu=1,
+                    vent_kmh=wind_kmh,
+                    humidite_pct=humidity,
+                    vitesse_kmh=prop_speed,
+                )
+                alert = ALERT_CODE_TO_LABEL[alert_code]
             else:
                 temp_c = round(raw_temp, 1)
-                humidity = round(max(42.0, raw_rh), 1)
-                wind_kmh = round(raw_wind * 0.6, 1)
+                humidity = round(max(35.0, raw_rh), 1)
+                wind_kmh = round(raw_wind * 0.7, 1)
                 wind_dir = str(rng.choice(cardinal_directions))
                 prop_dir = "Aucune"
                 prop_speed = 0.0

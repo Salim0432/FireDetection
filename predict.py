@@ -31,6 +31,7 @@ import cv2
 import numpy as np
 import torch
 
+from contracts import validate_cnn_output
 from model_cnn import FireUNet, load_trained_model
 from preprocessing import DEFAULT_IMAGE_SIZE, preprocess_image
 
@@ -123,6 +124,7 @@ def predict(
     image_path: str | Path,
     model_path: Optional[str | Path] = None,
     save_visualization: Optional[str | Path] = None,
+    apply_clahe: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """
     Fonction principale de prédiction (Tâche 3 - Salim).
@@ -184,8 +186,9 @@ def predict(
         raise ValueError(f"Impossible de décoder l'image : {img_file}")
     orig_h, orig_w = orig_bgr.shape[:2]
 
-    # Prétraitement (Tâche 1)
-    rgb_norm = preprocess_image(img_file, target_size=target_size, normalize=True)
+    # Prétraitement aligné avec l'entraînement SatelliteFireDataset (Tâche 1)
+    use_clahe = bool(config.get("apply_clahe", False)) if apply_clahe is None else bool(apply_clahe)
+    rgb_norm = preprocess_image(img_file, target_size=target_size, normalize=True, apply_clahe=use_clahe)
     device = next(model.parameters()).device
     input_tensor = (
         torch.from_numpy(np.transpose(rgb_norm, (2, 0, 1)))
@@ -208,7 +211,12 @@ def predict(
         seg_threshold=seg_threshold,
     )
 
-    has_fire = (cls_prob >= cls_threshold) or (location_info["affected_area_pct"] >= 1.5)
+    active_seg_pixels = seg_prob_map[seg_prob_map >= seg_threshold]
+    seg_fire_conf = float(active_seg_pixels.mean()) if active_seg_pixels.size > 0 else 0.0
+
+    has_fire = (cls_prob >= cls_threshold) or (
+        cls_prob >= 0.35 and location_info["affected_area_pct"] >= 3.0 and seg_fire_conf >= 0.65
+    )
     if not has_fire:
         binary_mask = np.zeros((orig_h, orig_w), dtype=np.uint8)
         location_info = {
@@ -221,7 +229,7 @@ def predict(
         }
     elif location_info["affected_area_pct"] == 0.0:
         # Si la tête de classification détecte le feu avec un seuil de masque légèrement prudent,
-        # on abaisse le seuil de segmentation à 0.30 pour localiser le point chaud principal.
+        # on abaisse le seuil de segmentation pour localiser le point chaud principal.
         location_info, binary_mask = _extract_localization_from_mask(
             prob_mask=seg_prob_map,
             orig_width=orig_w,
@@ -230,7 +238,10 @@ def predict(
         )
 
     fire_str = "Oui" if has_fire else "Non"
-    confidence = round(cls_prob if has_fire else (1.0 - cls_prob), 4)
+    if has_fire:
+        confidence = round(min(1.0, max(cls_prob, seg_fire_conf, 0.5)), 4)
+    else:
+        confidence = round(min(1.0, max(1.0 - cls_prob, 0.5)), 4)
 
     if has_fire:
         summary = (
@@ -279,14 +290,16 @@ def predict(
         out_vis_path.parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(out_vis_path), vis_bgr)
 
-    return {
-        "fire_detected": fire_str,
-        "has_fire": has_fire,
-        "confidence": confidence,
-        "location": location_info,
-        "summary": summary,
-        "segmentation_mask": binary_mask,
-    }
+    return validate_cnn_output(
+        {
+            "fire_detected": fire_str,
+            "has_fire": has_fire,
+            "confidence": confidence,
+            "location": location_info,
+            "summary": summary,
+            "segmentation_mask": binary_mask,
+        }
+    )
 
 
 if __name__ == "__main__":

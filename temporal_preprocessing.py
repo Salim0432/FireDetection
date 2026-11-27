@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import csv
 import math
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -111,12 +112,26 @@ def direction_to_angle(direction: Union[str, float, int]) -> float:
     if isinstance(direction, (int, float)):
         return float(direction) % 360.0
 
-    clean_str = str(direction).strip().upper()
+    raw_str = str(direction).strip()
+    try:
+        return float(raw_str) % 360.0
+    except ValueError:
+        pass
+
+    clean_str = re.sub(r"[\s_/]+", "-", raw_str.upper()).strip("-")
     if clean_str in CARDINAL_TO_ANGLE:
         return CARDINAL_TO_ANGLE[clean_str]
 
-    for key, angle in CARDINAL_TO_ANGLE.items():
-        if key in clean_str:
+    # Recherche par jetons complets d'abord, puis sous-chaînes triées de la plus longue à la plus courte
+    tokens = [t for t in re.split(r"[^A-Z]+", clean_str) if t]
+    compound = "-".join(tokens)
+    if compound in CARDINAL_TO_ANGLE:
+        return CARDINAL_TO_ANGLE[compound]
+
+    for key, angle in sorted(CARDINAL_TO_ANGLE.items(), key=lambda kv: len(kv[0]), reverse=True):
+        if len(key) >= 2 and key in clean_str:
+            return angle
+        if len(key) == 1 and key in tokens:
             return angle
     return 0.0
 
@@ -419,21 +434,20 @@ def prepare_datasets_for_training(
         seed=seed,
     )
 
-    X_raw, Y_raw = create_sliding_sequences(df_series, sequence_length=sequence_length)
-
-    # Séparation train / validation par épisodes complets pour éviter tout data leakage
-    num_samples = len(X_raw)
+    # Séparation train / validation strictement par épisodes complets (zéro data leakage)
+    unique_episodes = df_series["episode_id"].unique()
     rng = np.random.default_rng(seed)
-    indices = rng.permutation(num_samples)
-    split_idx = int(num_samples * (1.0 - val_split))
+    shuffled_episodes = rng.permutation(unique_episodes)
+    split_ep_idx = int(len(shuffled_episodes) * (1.0 - val_split))
 
-    train_idx = indices[:split_idx]
-    val_idx = indices[split_idx:]
+    train_episodes = set(shuffled_episodes[:split_ep_idx].tolist())
+    val_episodes = set(shuffled_episodes[split_ep_idx:].tolist())
 
-    X_train_raw = X_raw[train_idx]
-    Y_train_raw = Y_raw[train_idx]
-    X_val_raw = X_raw[val_idx]
-    Y_val_raw = Y_raw[val_idx]
+    df_train = df_series[df_series["episode_id"].isin(train_episodes)].reset_index(drop=True)
+    df_val = df_series[df_series["episode_id"].isin(val_episodes)].reset_index(drop=True)
+
+    X_train_raw, Y_train_raw = create_sliding_sequences(df_train, sequence_length=sequence_length)
+    X_val_raw, Y_val_raw = create_sliding_sequences(df_val, sequence_length=sequence_length)
 
     # Ajustement des scalers sur Train uniquement
     n_train, seq_len, n_feat = X_train_raw.shape
@@ -442,6 +456,9 @@ def prepare_datasets_for_training(
 
     y_scaler = TabularStandardScaler(feature_names=TARGET_COLUMNS)
     y_scaler.fit(Y_train_raw)
+    # Préservation géométrique exacte du cercle unitaire pour (target_dir_sin, target_dir_cos)
+    y_scaler.mean[1:3] = np.array([0.0, 0.0], dtype=np.float32)
+    y_scaler.scale[1:3] = np.array([1.0, 1.0], dtype=np.float32)
 
     # Transformation
     X_train = x_scaler.transform(X_train_raw.reshape(-1, n_feat)).reshape(n_train, seq_len, n_feat)
