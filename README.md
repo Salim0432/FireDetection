@@ -1,51 +1,40 @@
-# 🔥 Surveillance & Confinement Autonome des Feux de Forêt — Modules CNN & RNN/LSTM
+# 🔥 Surveillance & Confinement Autonome des Feux de Forêt
 
-**Projet 5 — Data Mining & Deep Learning (4ème Année Ingéniorat)**  
+**Projet 5 — Data Mining & Deep Learning (Architecture Multi-Agents)**
+
 👥 **Équipe :**
-- 👤 **Salim Chablaoui** (*Responsable Vision par Ordinateur — CNN / U-Net & Support Data*)
-- 👤 **Moundir** (*Responsable Modélisation Temporelle & Météo — RNN / LSTM & Support Data*)
+- 👤 **Salim Chablaoui** — *Agent 1 : Vision par Ordinateur (CNN / U-Net) & Support Data*
+- 👤 **Moundir Boucheriha** — *Agent 2 : Modélisation Temporelle & Météo (RNN / LSTM) & Support Data*
+- 👤 **Asma Dadou** — *Agent 3 : Système d'Alerte (Arbre de Décision), Orchestration & Démonstration Streamlit*
 
 ---
 
-## 📌 Présentation du Projet Multi-Agents
+## 📌 Objectif du Projet
 
-Ce dépôt contient l'implémentation complète des **deux premiers modules clés** pour l'architecture multi-agents de surveillance et de confinement autonome des feux de forêt (**Projet 5**) :
+Coordonner la détection précoce d'un incendie sur imagerie satellite et modéliser son expansion temporelle selon les conditions météorologiques afin de déclencher automatiquement les paliers d'alerte et d'évacuation :
 
-1. **👤 Agent 1 — Salim (Vision par Ordinateur - CNN / U-Net)** : Détection binaire de la présence du feu (`Oui`/`Non`) et segmentation spatiale pixel par pixel de la zone touchée sur imagerie satellite/aérienne (`predict(image_path)`).
-2. **👤 Agent 2 — Moundir (Modélisation Temporelle & Météo - RNN/LSTM)** : Prédiction de la vitesse et de la direction de propagation selon la localisation extraite par le CNN, le vent et l'humidité (`predict_propagation(location, wind, humidity)`).
-3. **👤 Agent 3 — Système d'Alerte & Intégration (Arbre de Décision & Streamlit)** : Fusion des prédictions CNN + LSTM + météo pour déclencher les paliers d'alerte (`Vert`, `Orange`, `Rouge`, `Évacuation`).
-
----
-
-## 🏗️ Architecture et Missions Réalisées
-
-### 👤 Module 1 — Vision par Ordinateur (Salim)
-
-- **Tâche 1 : Prétraitement des Images Satellites (`preprocessing.py`)** : Nettoyage automatique, égalisation adaptative CLAHE (réduction du voile atmosphérique), standardisation `128×128`, extraction spectrale des masques et data augmentation synchronisée.
-- **Tâche 2 : Entraînement du Modèle CNN Multi-Tâches (`model_cnn.py`)** : Architecture `FireUNet` (Encodeur-Décodeur U-Net avec Skip Connections + classification globale) avec fonction hybride BCE + Dice Loss (**Accuracy : 99.1%**, **Dice : 84.2%**, **IoU : 79.5%**).
-- **Tâche 3 : Sauvegarde & Inférence (`predict.py`)** : Modèle sauvegardé dans `models/fire_cnn_unet.pkl` et `models/fire_cnn_unet.h5`. Fonction `predict(image_path)` retournant `fire_detected`, `confidence`, `location` (secteur, barycentre, GPS, surface touchée %) et masque binaire.
-- **Mission Secondaire (Support Data - `data_support.py`)** : Téléchargement Kaggle et création du dataset global unifié `dataset/global_fire_weather_dataset.csv`.
+1. **Agent 1 — Salim (CNN / U-Net)** : Détection binaire de la présence du feu (`Oui`/`Non`) et segmentation spatiale pixel par pixel de la zone touchée sur imagerie satellite (`predict(image_path)`).
+2. **Agent 2 — Moundir (RNN / LSTM)** : Prédiction temporelle de la vitesse (`km/h`) et de la direction de propagation selon la localisation extraite par le CNN, le vent et l'humidité (`predict_propagation(location, wind, humidity)`).
+3. **Agent 3 — Asma (Arbre de Décision & Intégration)** : Classification explicable des paliers d'alerte (`🟢 VERT`, `🟠 ORANGE`, `🔴 ROUGE`, `🚨 ÉVACUATION`) via un `DecisionTreeClassifier` (`donner_alerte(...)`), pipeline unifié (`main.py` + `contracts.py`) et interface de démonstration (`app.py`).
 
 ---
 
-### 👤 Module 2 — Modélisation Temporelle & Météo (Moundir)
+## 🏗️ Architecture et Modules Réalisés
 
-- **Tâche 1 : Traitement Météorologique & Séries Temporelles (`temporal_preprocessing.py`)** :
-  - Traitement et feature engineering des variables atmosphériques (température, humidité relative `RH`, vent : vitesse et composantes vectorielles).
-  - Encodage cyclique trigonométrique des directions $(\sin \theta, \cos \theta)$ pour éliminer la discontinuité critique à $0^\circ \equiv 360^\circ$ dans les modèles récurrents.
-  - Calcul de l'indice météorologique de propagation initiale (FWI / ISI).
-- **Tâche 2 : Entraînement du Modèle RNN/LSTM (`model_lstm.py`)** :
-  - Architecture récurrente bidirectionnelle `FirePropagationLSTM` avec mécanisme de pooling par attention temporelle (`MultiHeadAttentionPooling`).
-  - Têtes de prédiction multi-tâches découplées :
-    1. Vitesse de propagation instantanée ($v \ge 0$ km/h).
-    2. Vecteur de direction unitaire garantissant une cohérence géométrique à $360^\circ$.
-    3. Expansion horaire multi-horizons ($t+1\text{h}$, $t+2\text{h}$, $t+3\text{h}$).
-  - Entraînement optimisé avec fonction de perte multi-objectifs (**MAE Vitesse : 0.28 km/h**, **Erreur Angulaire Moyenne : 5.7°**).
-- **Tâche 3 : Sauvegarde & Inférence (`predict_propagation.py`)** :
-  - Modèle final sauvegardé sous `models/fire_propagation_lstm.pkl` (et `models/fire_propagation_lstm.pt`).
-  - Fonction officielle **`predict_propagation(location, wind, humidity)`** qui retourne directement la direction et la vitesse de propagation du feu.
-- **Mission Secondaire : Support Data** :
-  - Outils de préparation et découpage en fenêtres temporelles glissantes (`create_sliding_sequences`, `generate_synthetic_propagation_sequences`) pour alimenter le Système d'Alerte et l'Arbre de Décision.
+### 👤 Agent 1 — Vision par Ordinateur (Salim)
+- **Prétraitement (`preprocessing.py`)** : Nettoyage automatique, égalisation adaptative CLAHE, standardisation `128×128`, extraction spectrale des masques (RGB / HSV / YCbCr) et data augmentation synchronisée.
+- **Modèle CNN Multi-Tâches (`model_cnn.py`)** : Architecture `FireUNet` (Encodeur-Décodeur U-Net avec Skip Connections + tête de classification globale) entraînée avec BCE + Dice Loss.
+- **Inférence (`predict.py`)** : Sauvegarde dans `models/fire_cnn_unet.pkl` et fonction `predict(image_path)` retournant `fire_detected`, `confidence`, `location` (secteur cardinal, barycentre, boîte englobante, `%` de surface touchée) et masque binaire.
+
+### 👤 Agent 2 — Modélisation Temporelle & Météo (Moundir)
+- **Séries Temporelles & Météo (`temporal_preprocessing.py`)** : Prétraitement de la vitesse/direction du vent, de l'humidité relative (`RH %`) et de la température, encodage cyclique $(\sin \theta, \cos \theta)$ des directions et découpage en fenêtres temporelles glissantes.
+- **Modèle RNN/LSTM (`model_lstm.py`)** : Architecture récurrente bidirectionnelle `FirePropagationLSTM` avec pooling temporel (`TemporalAttentionPooling`) prédisant la vitesse de propagation et le vecteur directionnel unitaire.
+- **Inférence (`predict_propagation.py`)** : Sauvegarde dans `models/fire_propagation_lstm.pkl` et fonction `predict_propagation(location, wind, humidity)`.
+
+### 👤 Agent 3 — Aide à la Décision & Orchestration (Asma)
+- **Arbre de Décision (`train_tree.py`, `predict_alert.py`)** : Classifieur CART (`DecisionTreeClassifier`, critère de Gini, validation croisée stratifiée 5-plis) sauvegardé dans `models/mon_arbre_alerte.pkl` pour déclencher les 4 paliers d'alerte à partir de `[feu, vent, humidite, vitesse_propagation]`.
+- **Contrat & Pipeline (`contracts.py`, `main.py`)** : Validation formelle des échanges inter-agents et orchestration séquentielle de bout en bout (avec court-circuit immédiat en palier `🟢 VERT` lorsqu'aucun feu n'est détecté).
+- **Démonstration Interactive (`app.py`)** : Tableau de bord web Streamlit permettant de charger une image satellite, régler le vent et l'humidité en temps réel, et visualiser la segmentation, la propagation et la décision d'évacuation.
 
 ---
 
@@ -53,38 +42,41 @@ Ce dépôt contient l'implémentation complète des **deux premiers modules clé
 
 ```text
 FireDetection/
-├── preprocessing.py                        # Salim - Tâche 1 : Nettoyage, CLAHE, masques & augmentation images
-├── model_cnn.py                            # Salim - Tâche 2 : Architecture CNN U-Net (FireUNet) & entraînement
-├── predict.py                              # Salim - Tâche 3 : Fonction predict(image_path) -> Oui/Non + Localisation
-├── data_support.py                         # Salim - Support Data : Téléchargement Kaggle & dataset global
-├── Salim_CNN_FireDetection_Notebook.ipynb    # Salim - Notebook Jupyter documenté
-├── Rapport_Technique_Salim_CNN.md          # Salim - Rapport technique détaillé
-├── train_and_verify.py                     # Salim - Script de vérification de bout en bout
+├── contracts.py                                # Contrat d'interface et validation inter-agents
+├── main.py                                     # Pipeline multi-agents complet (Salim -> Moundir -> Asma)
+├── app.py                                      # Application web de démonstration (Streamlit)
 │
-├── temporal_preprocessing.py               # Moundir - Tâche 1 & Support Data : Prétraitement météo & séquences
-├── model_lstm.py                           # Moundir - Tâche 2 : Architecture RNN/LSTM & entraînement multi-tâches
-├── predict_propagation.py                  # Moundir - Tâche 3 : Fonction officielle predict_propagation()
-├── Moundir_LSTM_FirePropagation_Notebook.ipynb # Moundir - Notebook Jupyter documenté
-├── Rapport_Technique_Moundir_LSTM.md        # Moundir - Rapport technique détaillé
-├── train_and_verify_lstm.py                # Moundir - Script de vérification de bout en bout
+├── preprocessing.py                            # Salim - Prétraitement, CLAHE, masques & augmentation
+├── model_cnn.py                                # Salim - Architecture CNN U-Net (FireUNet) & entraînement
+├── predict.py                                  # Salim - Inférence predict(image_path)
+├── data_support.py                             # Salim - Acquisition Kaggle & dataset global d'équipe
+├── train_and_verify.py                         # Salim - Script d'entraînement et vérification CNN
+├── Salim_CNN_FireDetection_Notebook.ipynb      # Salim - Notebook documenté
+├── Rapport_Technique_Salim_CNN.md              # Salim - Rapport technique (Vision CNN)
 │
-├── requirements.txt                        # Dépendances Python
+├── temporal_preprocessing.py                   # Moundir - Prétraitement météo & fenêtres glissantes
+├── model_lstm.py                               # Moundir - Architecture RNN/LSTM & entraînement
+├── predict_propagation.py                      # Moundir - Inférence predict_propagation()
+├── train_and_verify_lstm.py                    # Moundir - Script d'entraînement et vérification LSTM
+├── Moundir_LSTM_FirePropagation_Notebook.ipynb # Moundir - Notebook documenté
+├── Rapport_Technique_Moundir_LSTM.md           # Moundir - Rapport technique (Propagation LSTM)
+│
+├── train_tree.py                               # Asma - Entraînement & validation de l'Arbre de Décision
+├── predict_alert.py                            # Asma - Inférence donner_alerte()
+├── Asma_Integration_Notebook.ipynb             # Asma - Notebook documenté
+├── Rapport_Technique_Asma_Integration.md       # Asma - Rapport technique (Décision & Intégration)
+│
+├── requirements.txt                            # Dépendances Python
 ├── models/
-│   ├── fire_cnn_unet.pkl                   # Modèle CNN U-Net entraîné (Pickle)
-│   ├── fire_cnn_unet.h5                    # Modèle CNN U-Net entraîné (HDF5)
-│   ├── fire_propagation_lstm.pkl           # Modèle LSTM Propagation entraîné (Pickle)
-│   └── fire_propagation_lstm.pt           # Modèle LSTM Propagation entraîné (PyTorch)
+│   ├── fire_cnn_unet.pkl                       # Modèle CNN U-Net entraîné
+│   ├── fire_propagation_lstm.pkl               # Modèle RNN/LSTM entraîné
+│   └── mon_arbre_alerte.pkl                    # Arbre de Décision entraîné
 ├── dataset/
-│   ├── forestfires_kaggle.csv              # Dataset météo officiel Kaggle (517 lignes)
-│   ├── global_fire_weather_dataset.csv     # Dataset unifié (CNN + Météo + Propagation + Alerte)
-│   ├── kaggle_cleaned/                     # Images Kaggle nettoyées (128x128) + masques
-│   └── satellite_samples/                  # Échantillons satellites forestiers + masques
-└── outputs/
-    ├── demo_fire_segmented.png             # Démonstration segmentation satellite
-    ├── demo_kaggle_fire_segmented.png      # Démonstration segmentation Kaggle
-    ├── demo_nofire_segmented.png           # Démonstration non-feu
-    ├── training_metrics.json               # Historique d'entraînement CNN
-    └── lstm_training_metrics.json          # Historique d'entraînement LSTM
+│   ├── forestfires_kaggle.csv                  # Forest Fires Dataset officiel (Kaggle, 517 lignes)
+│   ├── global_fire_weather_dataset.csv         # Dataset unifié (CNN + Météo + Propagation + Alerte)
+│   ├── kaggle_cleaned/                         # Images Kaggle nettoyées (128x128) + masques
+│   └── satellite_samples/                      # Échantillons satellites forestiers + masques
+└── outputs/                                    # Métriques JSON d'entraînement et démos segmentées
 ```
 
 ---
@@ -96,44 +88,46 @@ FireDetection/
 pip install -r requirements.txt
 ```
 
-### 2. Détection par le CNN (Salim)
-```python
-from predict import predict
-
-res_cnn = predict("dataset/satellite_samples/images/fire/sat_fire_0001.png")
-print("Feu détecté :", res_cnn["fire_detected"])   # "Oui" / "Non"
-print("Localisation :", res_cnn["location"]["zone"]) # "Nord-Est", "Centre", etc.
+### 2. Lancer la démonstration interactive (Streamlit)
+```bash
+streamlit run app.py
 ```
 
-### 3. Prédiction de la Propagation par le LSTM (Moundir)
-```python
-from predict_propagation import predict_propagation
+### 3. Exécuter le pipeline multi-agents complet en ligne de commande
+```bash
+python main.py
+```
 
-# Utilisation directe avec la localisation du CNN, le vent et l'humidité
-res_lstm = predict_propagation(
-    location=res_cnn["location"],
-    wind={"speed": 38.0, "direction": "Sud-Ouest"},
+Exemple d'utilisation programmatique des 3 agents :
+```python
+from main import run_pipeline
+
+rapport = run_pipeline(
+    image_path="dataset/satellite_samples/images/fire/sat_fire_0001.png",
+    wind_speed=38.0,
+    wind_dir="Sud-Ouest",
     humidity=22.0,
     temperature=34.0,
+    return_details=True,
 )
-
-print("Direction de propagation :", res_lstm["propagation_direction"]) # ex: "Sud-Ouest"
-print("Vitesse de propagation   :", res_lstm["propagation_speed"], "km/h") # ex: 7.82 km/h
-print("Expansion horaire        :", res_lstm["expansion_next_hours"]) # {'+1h': 8.1, '+2h': 8.4, '+3h': 8.9}
-print("Synthèse :", res_lstm["summary"])
+print("Alerte :", rapport["alert"])
+print("Recommandation :", rapport["recommendation"])
 ```
 
-### 4. Entraîner et vérifier les modèles
+### 4. Ré-entraîner et vérifier chaque modèle individuellement
 ```bash
-# Vérification du module CNN (Salim)
+# Agent 1 — CNN / U-Net (Salim)
 python train_and_verify.py
 
-# Vérification du module LSTM (Moundir)
+# Agent 2 — RNN / LSTM (Moundir)
 python train_and_verify_lstm.py
+
+# Agent 3 — Arbre de Décision (Asma)
+python train_tree.py
 ```
 
 ---
 
 ## 🔗 Références des Datasets Kaggle (Projet 5)
-1. **Imagerie Feu & Forêt** : [FIRE Dataset (`phylake1337/fire-dataset`)](https://www.kaggle.com/datasets/phylake1337/fire-dataset)
-2. **Données Météorologiques & Feux de Forêt** : [Forest Fires Data Set (`elikplim/forest-fires-data-set`)](https://www.kaggle.com/datasets/elikplim/forest-fires-data-set)
+1. **Satellite / Fire Imagery** : [FIRE Dataset (`phylake1337/fire-dataset`)](https://www.kaggle.com/datasets/phylake1337/fire-dataset)
+2. **Forest Fires Dataset** : [Forest Fires Data Set (`elikplim/forest-fires-data-set`)](https://www.kaggle.com/datasets/elikplim/forest-fires-data-set)

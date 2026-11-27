@@ -2,9 +2,9 @@
 Pipeline d'Intégration Multi-Agents Unifié (`main.py` — Tâche 2 Asma)
 =====================================================================
 Orchestre la chaîne complète de détection, prévision temporelle et décision :
-  1. Salim   (CNN / U-Net)         : `predict(image_path)`
-  2. Moundir (Bi-LSTM + Attention) : `predict_propagation(location, wind, humidity, temperature)`
-  3. Asma    (Arbre de Décision)   : `donner_alerte(feu, vent, humidite, vitesse_propagation)`
+  1. Salim   (CNN / U-Net)        : `predict(image_path)`
+  2. Moundir (RNN / Bi-LSTM)      : `predict_propagation(location, wind, humidity, temperature)`
+  3. Asma    (Arbre de Décision)  : `donner_alerte(feu, vent, humidite, vitesse_propagation)`
 """
 
 from __future__ import annotations

@@ -8,18 +8,16 @@ Ce module assure :
    - Température (°C)
    - Humidité relative (RH %)
    - Vent : vitesse (km/h) et direction angulaire / cardinale
-   - Estimation de l'Indice de Propagation Initiale (ISI / FWI)
 2. La transformation cyclique des directions angulaires en composantes sin/cos
    pour éliminer les discontinuités à 0°/360° dans les réseaux récurrents.
 3. La génération et le séquençage glissant (sliding window) des séries temporelles
-   d'incendies simulant la dynamique d'expansion heure par heure (Support Data).
-4. La normalisation robuste (StandardScaler / MinMax) avec sérialisation des statistiques
+   d'incendies simulant la dynamique temporelle de propagation selon le vent et l'humidité.
+4. La normalisation robuste (StandardScaler) avec sérialisation des statistiques
    pour garantir une inférence déterministe sans data leakage.
 """
 
 from __future__ import annotations
 
-import csv
 import math
 import re
 from pathlib import Path
@@ -87,7 +85,6 @@ FEATURE_COLUMNS: List[str] = [
     "wind_speed_kmh",
     "wind_sin",
     "wind_cos",
-    "fire_weather_index",
     "affected_area_pct",
     "loc_x_norm",
     "loc_y_norm",
@@ -98,9 +95,6 @@ TARGET_COLUMNS: List[str] = [
     "target_speed_kmh",
     "target_dir_sin",
     "target_dir_cos",
-    "expansion_next_1h",
-    "expansion_next_2h",
-    "expansion_next_3h",
 ]
 
 
@@ -122,7 +116,6 @@ def direction_to_angle(direction: Union[str, float, int]) -> float:
     if clean_str in CARDINAL_TO_ANGLE:
         return CARDINAL_TO_ANGLE[clean_str]
 
-    # Recherche par jetons complets d'abord, puis sous-chaînes triées de la plus longue à la plus courte
     tokens = [t for t in re.split(r"[^A-Z]+", clean_str) if t]
     compound = "-".join(tokens)
     if compound in CARDINAL_TO_ANGLE:
@@ -140,7 +133,7 @@ def angle_to_cardinal(angle_deg: float) -> str:
     """Convertit un angle géométrique en degrés [0, 360[ vers le secteur cardinal le plus proche."""
     angle_mod = angle_deg % 360.0
     for sector_name, lower, upper in CARDINAL_8_SECTORS:
-        if lower > upper:  # Cas du Nord qui traverse 0° (337.5° -> 22.5°)
+        if lower > upper:
             if angle_mod >= lower or angle_mod < upper:
                 return sector_name
         else:
@@ -162,20 +155,8 @@ def sin_cos_to_angle(sin_val: float, cos_val: float) -> float:
     return deg % 360.0
 
 
-def compute_fire_weather_index(temp_c: float, rh_pct: float, wind_kmh: float) -> float:
-    """
-    Estime l'indice météorologique de propagation (inspiré de la formulation canadienne FWI / ISI).
-    Un FWI élevé indique une propagation fulgurante due à la chaleur, la sécheresse et le vent.
-    """
-    temp_factor = max(0.1, (temp_c - 10.0) * 0.06 + 0.8)
-    humidity_factor = max(0.2, (100.0 - rh_pct) / 50.0)
-    wind_factor = (wind_kmh / 15.0) ** 1.35
-    isi = 0.208 * wind_factor * humidity_factor * temp_factor
-    return float(np.clip(isi, 0.0, 50.0))
-
-
 # ---------------------------------------------------------------------------
-# Normaliseur Robuste Embarqué (sans dépendance externe lourde à l'inférence)
+# Normaliseur Robuste Embarqué
 # ---------------------------------------------------------------------------
 class TabularStandardScaler:
     """StandardScaler portable sérialisable dans le modèle .pkl."""
@@ -213,7 +194,7 @@ class TabularStandardScaler:
 
 
 # ---------------------------------------------------------------------------
-# Mission Secondaire : Support Data & Génération de Séries Temporelles
+# Génération & Séquençage de Séries Temporelles de Propagation
 # ---------------------------------------------------------------------------
 def simulate_fire_propagation_step(
     temp_c: float,
@@ -237,26 +218,18 @@ def simulate_fire_propagation_step(
     if affected_area_pct <= 0.01:
         return 0.0, 0.0, 0.0
 
-    # Effet du vent (moteur majeur)
     wind_term = 0.075 * (wind_speed_kmh ** 1.15)
-    # Effet de la sécheresse relative
     moisture_term = max(0.4, (100.0 - humidity_pct) / 45.0)
-    # Effet de la température
     heat_term = max(0.5, (temp_c / 25.0) ** 0.8)
-    # Inertie du feu
     inertia_term = 0.25 * prev_speed_kmh
 
-    # Vitesse de propagation
     base_speed = (wind_term * moisture_term * heat_term * 0.75) + inertia_term
-    # Légère fluctuation turbulente
     noise_speed = rng.normal(0.0, max(0.05, base_speed * 0.08))
     speed = float(np.clip(base_speed + noise_speed, 0.1, 15.0))
 
-    # Direction de propagation : alignée avec le vent avec dérive turbulente
     dir_drift = rng.normal(0.0, max(2.0, 20.0 / (1.0 + wind_speed_kmh * 0.1)))
     prop_direction = (wind_dir_deg + dir_drift) % 360.0
 
-    # Expansion horaire de surface
     expansion_factor = (speed * 0.65) * (1.0 + affected_area_pct * 0.08)
     delta_area = float(np.clip(expansion_factor * dt_hours, 0.05, 12.0))
 
@@ -272,7 +245,7 @@ def generate_synthetic_propagation_sequences(
     """
     Génère des séries temporelles horaires réalistes de propagation de feux
     en combinant les distributions météo réelles de Kaggle (temp, RH, wind)
-    avec une dynamique temporelle physique d'incendie (Support Data).
+    avec une dynamique temporelle physique d'incendie.
     """
     rng = np.random.default_rng(seed)
     csv_path = Path(base_dataset_csv)
@@ -284,7 +257,7 @@ def generate_synthetic_propagation_sequences(
             meteo_samples.append({
                 "temp": float(row.get("temp", 24.0)),
                 "rh": float(row.get("RH", 45.0)),
-                "wind": float(row.get("wind", 4.0)) * 6.0,  # km/h
+                "wind": float(row.get("wind", 4.0)) * 6.0,
             })
 
     if not meteo_samples:
@@ -298,30 +271,25 @@ def generate_synthetic_propagation_sequences(
     records: List[Dict[str, Any]] = []
 
     for ep_id in range(num_episodes):
-        # Conditions initiales du feu
         base_meteo = rng.choice(meteo_samples)
         curr_temp = base_meteo["temp"] + rng.uniform(-3.0, 3.0)
         curr_rh = base_meteo["rh"] + rng.uniform(-5.0, 5.0)
         curr_wind = max(8.0, base_meteo["wind"] + rng.uniform(-5.0, 10.0))
 
-        # Direction dominante du vent pour cet épisode
         base_wind_dir = rng.uniform(0.0, 360.0)
         curr_wind_dir = base_wind_dir
 
-        # Position spatiale initiale du feu
         pos_x = rng.uniform(0.15, 0.85)
         pos_y = rng.uniform(0.15, 0.85)
         curr_area = rng.uniform(0.8, 4.5)
         curr_speed = 0.5
 
         for step in range(episode_length):
-            # Évolution diurne de la météo au fil des heures
             curr_temp = np.clip(curr_temp + rng.normal(0.2, 0.8), 12.0, 44.0)
             curr_rh = np.clip(curr_rh + rng.normal(-0.3, 1.2), 10.0, 90.0)
             curr_wind = np.clip(curr_wind + rng.normal(0.1, 1.5), 5.0, 75.0)
             curr_wind_dir = (curr_wind_dir + rng.normal(0.0, 6.0)) % 360.0
 
-            # Propagation dynamique
             speed, prop_dir, delta_area = simulate_fire_propagation_step(
                 temp_c=curr_temp,
                 humidity_pct=curr_rh,
@@ -333,15 +301,13 @@ def generate_synthetic_propagation_sequences(
                 rng=rng,
             )
 
-            # Déplacement du barycentre sous l'effet du vent
             rad = math.radians(prop_dir)
-            step_disp = (speed * 0.008)  # déplacement normalisé
+            step_disp = speed * 0.008
             pos_x = np.clip(pos_x + step_disp * math.sin(rad), 0.05, 0.95)
             pos_y = np.clip(pos_y - step_disp * math.cos(rad), 0.05, 0.95)
             curr_area = min(65.0, curr_area + delta_area)
             curr_speed = speed
 
-            fwi = compute_fire_weather_index(curr_temp, curr_rh, curr_wind)
             w_sin, w_cos = angle_to_sin_cos(curr_wind_dir)
             p_sin, p_cos = angle_to_sin_cos(prop_dir)
 
@@ -354,7 +320,6 @@ def generate_synthetic_propagation_sequences(
                 "wind_direction_deg": round(float(curr_wind_dir), 2),
                 "wind_sin": round(float(w_sin), 4),
                 "wind_cos": round(float(w_cos), 4),
-                "fire_weather_index": round(float(fwi), 3),
                 "affected_area_pct": round(float(curr_area), 3),
                 "loc_x_norm": round(float(pos_x), 4),
                 "loc_y_norm": round(float(pos_y), 4),
@@ -365,19 +330,7 @@ def generate_synthetic_propagation_sequences(
                 "target_dir_cos": round(float(p_cos), 4),
             })
 
-    df = pd.DataFrame(records)
-
-    # Calcul multi-horizon (expansion aux prochaines 1h, 2h, 3h)
-    df["expansion_next_1h"] = df.groupby("episode_id")["historical_speed_kmh"].shift(-1)
-    df["expansion_next_2h"] = df.groupby("episode_id")["historical_speed_kmh"].shift(-2)
-    df["expansion_next_3h"] = df.groupby("episode_id")["historical_speed_kmh"].shift(-3)
-
-    # Complétion des horizons finaux avec extrapolation physique
-    df["expansion_next_1h"] = df["expansion_next_1h"].fillna(df["target_speed_kmh"] * 1.05)
-    df["expansion_next_2h"] = df["expansion_next_2h"].fillna(df["expansion_next_1h"] * 1.08)
-    df["expansion_next_3h"] = df["expansion_next_3h"].fillna(df["expansion_next_2h"] * 1.10)
-
-    return df
+    return pd.DataFrame(records)
 
 
 def create_sliding_sequences(
@@ -434,7 +387,6 @@ def prepare_datasets_for_training(
         seed=seed,
     )
 
-    # Séparation train / validation strictement par épisodes complets (zéro data leakage)
     unique_episodes = df_series["episode_id"].unique()
     rng = np.random.default_rng(seed)
     shuffled_episodes = rng.permutation(unique_episodes)
@@ -449,7 +401,6 @@ def prepare_datasets_for_training(
     X_train_raw, Y_train_raw = create_sliding_sequences(df_train, sequence_length=sequence_length)
     X_val_raw, Y_val_raw = create_sliding_sequences(df_val, sequence_length=sequence_length)
 
-    # Ajustement des scalers sur Train uniquement
     n_train, seq_len, n_feat = X_train_raw.shape
     x_scaler = TabularStandardScaler(feature_names=FEATURE_COLUMNS)
     x_scaler.fit(X_train_raw.reshape(-1, n_feat))
@@ -460,7 +411,6 @@ def prepare_datasets_for_training(
     y_scaler.mean[1:3] = np.array([0.0, 0.0], dtype=np.float32)
     y_scaler.scale[1:3] = np.array([1.0, 1.0], dtype=np.float32)
 
-    # Transformation
     X_train = x_scaler.transform(X_train_raw.reshape(-1, n_feat)).reshape(n_train, seq_len, n_feat)
     X_val = x_scaler.transform(X_val_raw.reshape(-1, n_feat)).reshape(len(X_val_raw), seq_len, n_feat)
 

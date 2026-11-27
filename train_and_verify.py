@@ -5,7 +5,7 @@ Exécute de bout en bout les Tâches 1, 2, 3 et la Mission Secondaire de Salim :
 1. Tâche 1 : Téléchargement Kaggle, nettoyage, redimensionnement et augmentation.
 2. Tâche 2 : Entraînement du modèle CNN U-Net (`FireUNet`) pour la détection et
    la segmentation de la zone touchée.
-3. Tâche 3 : Sauvegarde du modèle final (`.pkl` et `.h5`) et test de `predict(image_path)`.
+3. Tâche 3 : Sauvegarde du modèle final (`.pkl`) et test de `predict(image_path)`.
 4. Mission Secondaire : Génération du dataset global synchronisé pour Moundir (LSTM)
    et le Système d'Alerte (Arbre de Décision).
 """
@@ -34,7 +34,7 @@ def main() -> None:
     )
     print(f"Total Train : {len(train_samples)} images | Total Validation : {len(val_samples)} images")
 
-    # 2. Entraînement du modèle CNN U-Net et sauvegarde .pkl + .h5 (Tâche 2 & Tâche 3)
+    # 2. Entraînement du modèle CNN U-Net et sauvegarde .pkl (Tâche 2 & Tâche 3)
     print("\n[Étape 2/4] Entraînement du modèle CNN Multi-Tâches (FireUNet)...")
     model, history = train_fire_cnn(
         train_samples=train_samples,
@@ -44,16 +44,15 @@ def main() -> None:
         lr=1.2e-3,
         base_filters=16,
         pkl_save_path="models/fire_cnn_unet.pkl",
-        h5_save_path="models/fire_cnn_unet.h5",
     )
 
-    # Sauvegarde des métriques d'entraînement pour le rapport
+    # Sauvegarde des métriques d'entraînement
     Path("outputs").mkdir(parents=True, exist_ok=True)
     with open("outputs/training_metrics.json", "w", encoding="utf-8") as f:
         json.dump(history, f, indent=2)
 
     # 3. Test de la fonction predict(image_path) sur des images Feu et Non-Feu (Tâche 3)
-    print("\n[Étape 3/4] Validation de la fonction predict(image_path) (.pkl & .h5)...")
+    print("\n[Étape 3/4] Validation de la fonction predict(image_path)...")
     fire_test_img = next(p for p, lbl, _ in val_samples if lbl == 1)
     nofire_test_img = next(p for p, lbl, _ in val_samples if lbl == 0)
 
@@ -62,26 +61,19 @@ def main() -> None:
         model_path="models/fire_cnn_unet.pkl",
         save_visualization="outputs/demo_fire_segmented.png",
     )
-    res_fire_h5 = predict(
-        fire_test_img,
-        model_path="models/fire_cnn_unet.h5",
-    )
     res_nofire = predict(
         nofire_test_img,
         model_path="models/fire_cnn_unet.pkl",
         save_visualization="outputs/demo_nofire_segmented.png",
     )
 
-    print("\n--- Test 1 : Image avec Feu (via .pkl) ---")
+    print("\n--- Test 1 : Image avec Feu ---")
     print("  Chemin      :", fire_test_img)
     print("  Feu détecté :", res_fire_pkl["fire_detected"])
     print("  Confiance   :", res_fire_pkl["confidence"])
     print("  Localisation:", res_fire_pkl["location"])
 
-    print("\n--- Test 2 : Vérification identique via modèle .h5 ---")
-    print("  Feu détecté :", res_fire_h5["fire_detected"], "| Confiance :", res_fire_h5["confidence"])
-
-    print("\n--- Test 3 : Image sans Feu ---")
+    print("\n--- Test 2 : Image sans Feu ---")
     print("  Chemin      :", nofire_test_img)
     print("  Feu détecté :", res_nofire["fire_detected"])
     print("  Confiance   :", res_nofire["confidence"])

@@ -42,7 +42,7 @@ def main() -> None:
     scenarios = [
         {
             "nom": "Scénario 1 : Incendie violent avec vent fort du Sud-Ouest et air très sec",
-            "location": {"zone": "Nord-Est", "affected_area_pct": 8.5, "gps_coords": (36.78, 5.09)},
+            "location": {"zone": "Nord-Est", "affected_area_pct": 8.5, "normalized_coords": (0.75, 0.25)},
             "wind": {"speed": 45.0, "direction": "Sud-Ouest"},
             "humidity": 18.0,
             "temp": 36.5,
@@ -76,8 +76,6 @@ def main() -> None:
         print("Résultat :")
         print(f"  * Direction de propagation : {res['propagation_direction']} ({res['direction_angle_deg']}°)")
         print(f"  * Vitesse de propagation   : {res['propagation_speed']} km/h ({res['speed_m_per_min']} m/min)")
-        print(f"  * Expansion à venir (+1h, +2h, +3h) : {res['expansion_next_hours']}")
-        print(f"  * Indice météo FWI : {res['fire_weather_index']}")
         print(f"  * Synthèse : {res['summary']}")
 
     print("\n" + "=" * 80)

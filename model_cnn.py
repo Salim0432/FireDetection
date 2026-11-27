@@ -9,17 +9,15 @@ Ce module implémente :
   1. La détection binaire de la présence de feu (Tête de Classification Globale).
   2. La segmentation pixel par pixel de la zone touchée par l'incendie (Tête Décodeur U-Net).
 - La fonction de perte hybride combinant Binary Cross-Entropy (BCE) et Dice Loss.
-- La sauvegarde et le chargement du modèle final aux formats `.pkl` et `.h5` (Tâche 3).
+- La sauvegarde et le chargement du modèle final au format `.pkl` (Tâche 3).
 """
 
 from __future__ import annotations
 
-import json
 import pickle
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import h5py
 import numpy as np
 import torch
 import torch.nn as nn
@@ -227,29 +225,25 @@ def compute_metrics(
 def save_model_artifacts(
     model: FireUNet,
     pkl_path: str | Path = "models/fire_cnn_unet.pkl",
-    h5_path: str | Path = "models/fire_cnn_unet.h5",
     image_size: Tuple[int, int] = DEFAULT_IMAGE_SIZE,
     history: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, str]:
     """
-    Sauvegarde le modèle final simultanément aux formats `.pkl` et `.h5` (Tâche 3).
+    Sauvegarde le modèle final au format `.pkl` (Tâche 3).
 
     Args:
         model (FireUNet): Modèle entraîné.
         pkl_path (str | Path): Chemin du fichier `.pkl`.
-        h5_path (str | Path): Chemin du fichier `.h5`.
         image_size (Tuple[int, int]): Résolution d'entrée du modèle.
         history (Optional[Dict[str, Any]]): Historique des métriques d'entraînement.
 
     Returns:
-        Dict[str, str]: Chemins absolus des modèles sauvegardés.
+        Dict[str, str]: Chemin absolu du modèle sauvegardé.
     """
     pkl_file = Path(pkl_path)
-    h5_file = Path(h5_path)
     pkl_file.parent.mkdir(parents=True, exist_ok=True)
-    h5_file.parent.mkdir(parents=True, exist_ok=True)
 
-    # Extraction des poids en numpy (portable entre CPU/GPU et sérialisable en .pkl et .h5)
+    # Extraction des poids en numpy (portable entre CPU/GPU et sérialisable en .pkl)
     state_dict_np = {k: v.detach().cpu().numpy() for k, v in model.state_dict().items()}
     config = {
         "architecture": "FireUNet",
@@ -260,7 +254,6 @@ def save_model_artifacts(
         "seg_threshold": 0.5,
     }
 
-    # 1. Sauvegarde au format .pkl
     payload = {
         "config": config,
         "state_dict_np": state_dict_np,
@@ -269,19 +262,7 @@ def save_model_artifacts(
     with open(pkl_file, "wb") as f:
         pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-    # 2. Sauvegarde au format .h5 (HDF5)
-    with h5py.File(h5_file, "w") as hf:
-        hf.attrs["config_json"] = json.dumps(config)
-        if history:
-            hf.attrs["history_json"] = json.dumps(history)
-        weights_grp = hf.create_group("weights")
-        for key, arr in state_dict_np.items():
-            if arr.ndim > 0:
-                weights_grp.create_dataset(key, data=arr, compression="gzip")
-            else:
-                weights_grp.create_dataset(key, data=arr)
-
-    return {"pkl_path": str(pkl_file.resolve()), "h5_path": str(h5_file.resolve())}
+    return {"pkl_path": str(pkl_file.resolve())}
 
 
 def load_trained_model(
@@ -289,10 +270,10 @@ def load_trained_model(
     device: Optional[str] = None,
 ) -> Tuple[FireUNet, Dict[str, Any]]:
     """
-    Charge le modèle CNN U-Net depuis un fichier `.pkl` ou `.h5`.
+    Charge le modèle CNN U-Net depuis un fichier `.pkl`.
 
     Args:
-        model_path (str | Path): Chemin vers le fichier `.pkl` ou `.h5`.
+        model_path (str | Path): Chemin vers le fichier `.pkl`.
         device (Optional[str]): 'cpu' ou 'cuda'.
 
     Returns:
@@ -305,18 +286,13 @@ def load_trained_model(
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    if path.suffix.lower() == ".pkl":
-        with open(path, "rb") as f:
-            payload = pickle.load(f)
-        config = payload["config"]
-        state_dict_np = payload["state_dict_np"]
-    elif path.suffix.lower() in {".h5", ".hdf5"}:
-        with h5py.File(path, "r") as hf:
-            config = json.loads(hf.attrs["config_json"])
-            weights_grp = hf["weights"]
-            state_dict_np = {k: np.array(weights_grp[k]) for k in weights_grp.keys()}
-    else:
-        raise ValueError(f"Format de modèle non supporté ({path.suffix}). Utilisez .pkl ou .h5.")
+    if path.suffix.lower() != ".pkl":
+        raise ValueError(f"Format de modèle non supporté ({path.suffix}). Utilisez .pkl.")
+
+    with open(path, "rb") as f:
+        payload = pickle.load(f)
+    config = payload["config"]
+    state_dict_np = payload["state_dict_np"]
 
     model = FireUNet(
         in_channels=int(config.get("in_channels", 3)),
@@ -338,11 +314,10 @@ def train_fire_cnn(
     base_filters: int = 16,
     image_size: Tuple[int, int] = DEFAULT_IMAGE_SIZE,
     pkl_save_path: str | Path = "models/fire_cnn_unet.pkl",
-    h5_save_path: str | Path = "models/fire_cnn_unet.h5",
 ) -> Tuple[FireUNet, Dict[str, List[float]]]:
     """
     Entraîne le modèle CNN Multi-Tâches (FireUNet) sur le dataset d'images satellites
-    et sauvegarde automatiquement le meilleur modèle aux formats `.pkl` et `.h5`.
+    et sauvegarde automatiquement le meilleur modèle au format `.pkl`.
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
     train_ds = SatelliteFireDataset(train_samples, image_size=image_size, augment=True)
@@ -454,9 +429,8 @@ def train_fire_cnn(
     saved_paths = save_model_artifacts(
         model=model,
         pkl_path=pkl_save_path,
-        h5_path=h5_save_path,
         image_size=image_size,
         history=history,
     )
-    print(f"Modèle sauvegardé avec succès :\n  - PKL : {saved_paths['pkl_path']}\n  - H5  : {saved_paths['h5_path']}")
+    print(f"Modèle sauvegardé avec succès : {saved_paths['pkl_path']}")
     return model, history

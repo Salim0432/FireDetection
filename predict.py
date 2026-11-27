@@ -16,7 +16,6 @@ Sortie de `predict(image_path)` :
     * `zone`              : Secteur cardinal sur l'image satellite (ex: "Nord-Est", "Centre")
     * `center_xy`         : Coordonnées pixels (x, y) du barycentre du feu
     * `normalized_coords` : Coordonnées normalisées (nx, ny) dans [0, 1]
-    * `gps_coords`        : Coordonnées géographiques estimées (latitude, longitude)
     * `bbox`              : Boîte englobante [x_min, y_min, x_max, y_max]
     * `affected_area_pct` : Pourcentage de la surface satellite touchée par le feu (%)
 - `segmentation_mask` : Masque binaire 2D (H, W) de la zone touchée
@@ -60,8 +59,6 @@ def _extract_localization_from_mask(
     orig_width: int,
     orig_height: int,
     seg_threshold: float = 0.5,
-    base_lat: float = 36.75,
-    base_lon: float = 5.05,
 ) -> Tuple[Dict[str, Any], np.ndarray]:
     """
     Calcule la boîte englobante, le barycentre, le secteur cardinal et la surface touchée
@@ -80,7 +77,6 @@ def _extract_localization_from_mask(
                 "zone": "Aucune",
                 "center_xy": None,
                 "normalized_coords": None,
-                "gps_coords": None,
                 "bbox": None,
                 "affected_area_pct": 0.0,
             },
@@ -105,15 +101,10 @@ def _extract_localization_from_mask(
     ny = round(cy / max(float(orig_height - 1), 1.0), 4)
     zone = _compute_cardinal_zone(nx, ny)
 
-    # Projection GPS locale indicative (ex: région forestière méditerranéenne / Béjaïa-Kabylie)
-    lat = round(base_lat + (0.5 - ny) * 0.10, 5)
-    lon = round(base_lon + (nx - 0.5) * 0.10, 5)
-
     location_info = {
         "zone": zone,
         "center_xy": (cx, cy),
         "normalized_coords": (nx, ny),
-        "gps_coords": (lat, lon),
         "bbox": [x_min, y_min, x_max, y_max],
         "affected_area_pct": affected_area_pct,
     }
@@ -133,8 +124,8 @@ def predict(
 
     Args:
         image_path (str | Path): Chemin vers l'image satellite à analyser.
-        model_path (Optional[str | Path]): Chemin vers le modèle `.pkl` ou `.h5`.
-            Par défaut, cherche `models/fire_cnn_unet.pkl` puis `models/fire_cnn_unet.h5`.
+        model_path (Optional[str | Path]): Chemin vers le modèle `.pkl`.
+            Par défaut, cherche `models/fire_cnn_unet.pkl`.
         save_visualization (Optional[str | Path]): Si fourni, sauvegarde une image
             annotée (masque rouge semi-transparent + boîte englobante + barycentre).
 
@@ -143,7 +134,7 @@ def predict(
             - "fire_detected" (str) : "Oui" ou "Non"
             - "has_fire" (bool) : True si feu détecté, False sinon
             - "confidence" (float) : Niveau de confiance du modèle dans [0, 1]
-            - "location" (dict) : Secteur, coordonnées (x, y), GPS, bbox et % surface touchée
+            - "location" (dict) : Secteur, coordonnées (x, y), bbox et % surface touchée
             - "summary" (str) : Texte explicatif prêt pour l'interface Streamlit
             - "segmentation_mask" (np.ndarray) : Masque binaire 2D (H, W)
     """
@@ -153,18 +144,12 @@ def predict(
     if not img_file.is_file():
         raise FileNotFoundError(f"Image introuvable : {img_file}")
 
-    # Résolution automatique du chemin du modèle (.pkl ou .h5)
     base_dir = Path(__file__).resolve().parent
     if model_path is None:
-        default_pkl = base_dir / "models" / "fire_cnn_unet.pkl"
-        default_h5 = base_dir / "models" / "fire_cnn_unet.h5"
-        if default_pkl.is_file():
-            resolved_model_path = default_pkl
-        elif default_h5.is_file():
-            resolved_model_path = default_h5
-        else:
+        resolved_model_path = base_dir / "models" / "fire_cnn_unet.pkl"
+        if not resolved_model_path.is_file():
             raise FileNotFoundError(
-                "Aucun modèle sauvegardé trouvé dans 'models/fire_cnn_unet.pkl' ou '.h5'."
+                "Aucun modèle sauvegardé trouvé dans 'models/fire_cnn_unet.pkl'."
             )
     else:
         resolved_model_path = Path(model_path)
@@ -223,7 +208,6 @@ def predict(
             "zone": "Aucune",
             "center_xy": None,
             "normalized_coords": None,
-            "gps_coords": None,
             "bbox": None,
             "affected_area_pct": 0.0,
         }

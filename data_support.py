@@ -317,16 +317,13 @@ def build_global_team_dataset(
         "fire_detected",           # Sortie Salim ("Oui" / "Non")
         "confidence",              # Sortie Salim ([0..1])
         "location_zone",           # Sortie Salim ("Nord-Est", "Centre", etc.)
-        "latitude",                # Sortie Salim (GPS lat)
-        "longitude",               # Sortie Salim (GPS lon)
         "affected_area_pct",       # Sortie Salim (% surface touchée)
-        "temperature_c",           # Entrée Météo Kaggle (Moundir & Arbre de Décision)
+        "temperature_c",           # Entrée Météo Kaggle (Moundir)
         "humidity_pct",            # Entrée Météo Kaggle RH (Moundir & Arbre de Décision)
         "wind_speed_kmh",          # Entrée Météo Kaggle wind (Moundir & Arbre de Décision)
         "wind_direction",          # Entrée Météo (Moundir)
-        "propagation_direction",   # Cible Moundir (LSTM)
-        "propagation_speed_kmh",   # Cible Moundir (LSTM)
-        "towards_populated_zone",  # Entrée Arbre de Décision ("Oui" / "Non")
+        "propagation_direction",   # Sortie Moundir (LSTM)
+        "propagation_speed_kmh",   # Sortie Moundir (LSTM & Arbre de Décision)
         "alert_level",             # Cible Arbre de Décision ("Vert", "Orange", "Rouge", "Évacuation")
     ]
 
@@ -376,7 +373,6 @@ def build_global_team_dataset(
                 )
                 prop_dir = lstm_res["propagation_direction"]
                 prop_speed = lstm_res["propagation_speed"]
-                near_hab = "Oui" if rng.random() < 0.45 else "Non"
 
                 alert_code = compute_reference_alert_code(
                     feu=1,
@@ -392,10 +388,7 @@ def build_global_team_dataset(
                 wind_dir = str(rng.choice(cardinal_directions))
                 prop_dir = "Aucune"
                 prop_speed = 0.0
-                near_hab = "Non"
                 alert = "Vert"
-
-            gps = loc["gps_coords"] if loc["gps_coords"] is not None else (36.75, 5.05)
 
             writer.writerow(
                 {
@@ -404,8 +397,6 @@ def build_global_team_dataset(
                     "fire_detected": pred["fire_detected"],
                     "confidence": pred["confidence"],
                     "location_zone": loc["zone"],
-                    "latitude": gps[0],
-                    "longitude": gps[1],
                     "affected_area_pct": loc["affected_area_pct"],
                     "temperature_c": temp_c,
                     "humidity_pct": humidity,
@@ -413,7 +404,6 @@ def build_global_team_dataset(
                     "wind_direction": wind_dir,
                     "propagation_direction": prop_dir,
                     "propagation_speed_kmh": prop_speed,
-                    "towards_populated_zone": near_hab,
                     "alert_level": alert,
                 }
             )

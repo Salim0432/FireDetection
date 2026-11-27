@@ -6,12 +6,11 @@ import streamlit as st
 from contracts import CARDINAL_DIRECTIONS_8
 from main import run_pipeline
 
-# Configuration de la page
 st.set_page_config(page_title="Alerte Incendie - Projet 5", page_icon="🔥", layout="wide")
 
-st.title("🔥 Système Multi-Agents de Surveillance et d'Alerte des Feux de Forêt")
+st.title("🔥 Système Multi-Agents de Surveillance et de Confinement des Feux de Forêt")
 st.markdown(
-    "**Projet 5 — Vision CNN/U-Net (Salim) • Propagation Bi-LSTM (Moundir) • Arbre de Décision (Asma)**"
+    "**Projet 5 — Vision CNN/U-Net (Salim) • Propagation RNN/LSTM (Moundir) • Arbre de Décision (Asma)**"
 )
 
 col1, col2 = st.columns([1, 1])
@@ -45,7 +44,7 @@ if st.button("🚀 LANCER L'ANALYSE MULTI-AGENTS", use_container_width=True):
         with open(chemin_temp, "wb") as f:
             f.write(uploaded_file.getbuffer())
 
-        with st.spinner("Exécution du pipeline : CNN (Salim) ➔ Bi-LSTM (Moundir) ➔ Arbre de Décision (Asma)..."):
+        with st.spinner("Exécution du pipeline : CNN (Salim) ➔ RNN/LSTM (Moundir) ➔ Arbre de Décision (Asma)..."):
             try:
                 rapport = run_pipeline(
                     image_path=chemin_temp,
@@ -80,31 +79,24 @@ if st.button("🚀 LANCER L'ANALYSE MULTI-AGENTS", use_container_width=True):
                     loc = res_cnn["location"]
                     m1, m2, m3 = st.columns(3)
                     m1.metric("Feu détecté", res_cnn["fire_detected"])
+                    m1_zone = loc["zone"]
                     m2.metric("Confiance CNN", f"{res_cnn['confidence'] * 100:.1f}%")
                     m3.metric("Surface touchée", f"{loc['affected_area_pct']:.2f}%")
                     st.caption(
-                        f"**Secteur :** `{loc['zone']}` | **Barycentre :** `{loc['center_xy']}` | "
-                        f"**GPS estimé :** `{loc['gps_coords']}`"
+                        f"**Secteur :** `{m1_zone}` | **Barycentre (px) :** `{loc['center_xy']}` | "
+                        f"**Boîte englobante :** `{loc['bbox']}`"
                     )
 
                 with pan_lstm:
-                    st.markdown("### 🌪️ Agent 2 — Dynamique & Propagation (Moundir)")
+                    st.markdown("### 🌪️ Agent 2 — Propagation Temporelle RNN/LSTM (Moundir)")
                     if res_lstm is not None:
-                        l1, l2, l3 = st.columns(3)
+                        l1, l2 = st.columns(2)
                         l1.metric("Direction prédite", res_lstm["propagation_direction"])
-                        l2.metric("Vitesse (RoS)", f"{res_lstm['propagation_speed']:.2f} km/h")
-                        l3.metric("Indice FWI", f"{res_lstm['fire_weather_index']:.2f}")
+                        l2.metric("Vitesse de propagation", f"{res_lstm['propagation_speed']:.2f} km/h")
 
-                        exp = res_lstm["expansion_next_hours"]
-                        st.markdown("**Projection d'expansion horaire (Bi-LSTM + Attention) :**")
-                        h1, h2, h3 = st.columns(3)
-                        h1.metric("Horizon +1h", f"{exp['+1h']:.2f} km/h")
-                        h2.metric("Horizon +2h", f"{exp['+2h']:.2f} km/h")
-                        h3.metric("Horizon +3h", f"{exp['+3h']:.2f} km/h")
-                        st.caption(
-                            f"**Angle continu :** `{res_lstm['direction_angle_deg']}°` | "
-                            f"**Vitesse linéaire :** `{res_lstm['speed_m_per_min']} m/min`"
-                        )
+                        l3, l4 = st.columns(2)
+                        l3.metric("Angle continu", f"{res_lstm['direction_angle_deg']}°")
+                        l4.metric("Vitesse linéaire", f"{res_lstm['speed_m_per_min']} m/min")
                     else:
                         st.info("Aucun foyer actif détecté par le CNN — modélisation de propagation non requise.")
 

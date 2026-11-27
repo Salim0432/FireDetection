@@ -2,9 +2,9 @@
 Contrat d'Interface Multi-Agents (Projet 5 — Surveillance & Confinement des Feux de Forêt)
 ==========================================================================================
 Définit et valide formellement les structures d'échange de données entre les 3 agents :
-  1. Agent 1 (Salim   — CNN / U-Net)          : Image -> Détection & Localisation spatiale
-  2. Agent 2 (Moundir — Bi-LSTM + Attention)  : Localisation + Météo -> Vitesse & Direction
-  3. Agent 3 (Asma    — Arbre de Décision)    : Feu + Météo + Vitesse -> Palier d'Alerte
+  1. Agent 1 (Salim   — CNN / U-Net)         : Image -> Détection & Localisation spatiale
+  2. Agent 2 (Moundir — RNN / Bi-LSTM)       : Localisation + Météo -> Vitesse & Direction
+  3. Agent 3 (Asma    — Arbre de Décision)   : Feu + Météo + Vitesse -> Palier d'Alerte
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 
 # ---------------------------------------------------------------------------
-# Référentiels Normalisés du Projet (Conformes au Rapport Général - Table 2)
+# Référentiels Normalisés du Projet
 # ---------------------------------------------------------------------------
 CARDINAL_DIRECTIONS_8: Tuple[str, ...] = (
     "Nord",
@@ -74,21 +74,8 @@ DECISION_TREE_FEATURES: List[str] = [
 
 
 # ---------------------------------------------------------------------------
-# Schémas de Données Typés (Dataclasses)
+# Schéma de Décision Typé (Dataclass)
 # ---------------------------------------------------------------------------
-@dataclass(frozen=True)
-class CNNLocationContract:
-    zone: str
-    center_xy: Optional[Tuple[int, int]]
-    normalized_coords: Optional[Tuple[float, float]]
-    gps_coords: Optional[Tuple[float, float]]
-    bbox: Optional[List[int]]
-    affected_area_pct: float
-
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
-
-
 @dataclass(frozen=True)
 class AlertDecisionContract:
     alert_code: int
@@ -123,7 +110,7 @@ def validate_cnn_output(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError(f"[Contrat CNN invalide] confidence={conf} hors de [0, 1].")
 
     loc = payload["location"]
-    loc_keys = {"zone", "center_xy", "normalized_coords", "gps_coords", "bbox", "affected_area_pct"}
+    loc_keys = {"zone", "center_xy", "normalized_coords", "bbox", "affected_area_pct"}
     missing_loc = loc_keys - set(loc.keys())
     if missing_loc:
         raise ValueError(f"[Contrat CNN invalide] Clés location manquantes : {sorted(missing_loc)}")
@@ -144,8 +131,6 @@ def validate_lstm_output(payload: Dict[str, Any]) -> Dict[str, Any]:
         "direction_angle_deg",
         "speed_kmh",
         "speed_m_per_min",
-        "expansion_next_hours",
-        "fire_weather_index",
         "summary",
     }
     missing = required_keys - set(payload.keys())
@@ -164,11 +149,6 @@ def validate_lstm_output(payload: Dict[str, Any]) -> Dict[str, Any]:
     angle = float(payload["direction_angle_deg"])
     if not (0.0 <= angle < 360.0):
         raise ValueError(f"[Contrat LSTM invalide] direction_angle_deg={angle} hors de [0, 360[.")
-
-    exp = payload["expansion_next_hours"]
-    for h_key in ("+1h", "+2h", "+3h"):
-        if h_key not in exp or float(exp[h_key]) < 0.0:
-            raise ValueError(f"[Contrat LSTM invalide] Horizon {h_key} manquant ou négatif dans expansion_next_hours.")
 
     return payload
 
@@ -194,7 +174,7 @@ def compute_reference_alert_code(
     vitesse_kmh: float,
 ) -> int:
     """
-    Règle opérationnelle de référence conforme à la Table 2 et à la Figure 1 du Rapport Général :
+    Règle opérationnelle de référence pour les paliers d'alerte :
       - 0 (Vert)       : Aucun feu détecté (feu == 0)
       - 3 (Évacuation) : Feu actif + vent violent (> 40 km/h, ou >= 38 km/h avec RH <= 30% / vitesse >= 6.0 km/h,
                          ou sécheresse aride RH <= 20% avec vent >= 30 km/h, ou vitesse >= 7.2 km/h)

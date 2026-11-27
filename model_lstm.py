@@ -4,20 +4,18 @@ Module d'Architecture et d'Entraînement du Modèle RNN/LSTM (Tâche 2 - Moundir
 Responsable : Moundir (Modélisation Temporelle & Météo - RNN/LSTM)
 
 Ce module implémente :
-1. L'architecture récurrente avancée `FirePropagationLSTM` pour séries temporelles météorologiques
+1. L'architecture récurrente `FirePropagationLSTM` pour séries temporelles météorologiques
    et historiques d'incendies.
-2. Une tête de prédiction multi-tâches :
+2. Deux têtes de prédiction dédiées :
    - Vitesse de propagation instantanée (km/h)
    - Vecteur directionnel unitaire (sin θ, cos θ) garantissant une cohérence angulaire 360°
-   - Horizons futurs d'expansion (t+1h, t+2h, t+3h) pour anticiper le front de flamme
-3. L'entraînement optimisé avec fonction de perte multi-objectifs (MSE + Perte Angulaire Vectorielle)
+3. L'entraînement optimisé avec fonction de perte multi-objectifs (Smooth L1 + Perte Angulaire Vectorielle)
 4. La sérialisation complète du modèle entraîné au format `.pkl` (Tâche 3).
 """
 
 from __future__ import annotations
 
 import json
-import math
 import pickle
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -33,15 +31,13 @@ from temporal_preprocessing import (
     FEATURE_COLUMNS,
     TARGET_COLUMNS,
     TabularStandardScaler,
-    angle_to_cardinal,
-    angle_to_sin_cos,
     prepare_datasets_for_training,
     sin_cos_to_angle,
 )
 
 
-class MultiHeadAttentionPooling(nn.Module):
-    """Mécanisme d'attention temporelle pour pondérer les pas de temps critiques de la séquence."""
+class TemporalAttentionPooling(nn.Module):
+    """Pondération temporelle additive sur les états cachés de la séquence LSTM."""
 
     def __init__(self, hidden_dim: int) -> None:
         super().__init__()
@@ -52,17 +48,15 @@ class MultiHeadAttentionPooling(nn.Module):
         )
 
     def forward(self, rnn_out: torch.Tensor) -> torch.Tensor:
-        # rnn_out: (batch_size, seq_len, hidden_dim)
         scores = self.attn(rnn_out)  # (batch_size, seq_len, 1)
         weights = F.softmax(scores, dim=1)
-        context = torch.sum(weights * rnn_out, dim=1)  # (batch_size, hidden_dim)
-        return context
+        return torch.sum(weights * rnn_out, dim=1)
 
 
 class FirePropagationLSTM(nn.Module):
     """
-    Réseau Récurrent LSTM pour la prédiction de la propagation des feux de forêt.
-    Intègre la dynamique temporelle météo (vent, humidité, température) et l'inertie du feu.
+    Réseau Récurrent LSTM pour la prédiction de la propagation des feux de forêt
+    selon le vent, l'humidité, la température et la localisation initiale.
     """
 
     def __init__(
@@ -99,9 +93,8 @@ class FirePropagationLSTM(nn.Module):
             bidirectional=bidirectional,
         )
 
-        self.attn_pool = MultiHeadAttentionPooling(effective_hidden)
+        self.attn_pool = TemporalAttentionPooling(effective_hidden)
 
-        # Tronc commun partagé
         self.shared_fc = nn.Sequential(
             nn.Linear(effective_hidden, 64),
             nn.LayerNorm(64),
@@ -109,7 +102,6 @@ class FirePropagationLSTM(nn.Module):
             nn.Dropout(dropout),
         )
 
-        # Têtes spécialisées multi-tâches
         # 1. Tête Vitesse (km/h)
         self.speed_head = nn.Sequential(
             nn.Linear(64, 32),
@@ -124,17 +116,10 @@ class FirePropagationLSTM(nn.Module):
             nn.Linear(32, 2),
         )
 
-        # 3. Tête Expansion Future multi-horizons (+1h, +2h, +3h)
-        self.expansion_head = nn.Sequential(
-            nn.Linear(64, 32),
-            nn.ReLU(),
-            nn.Linear(32, 3),
-        )
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         x: Tenseur d'entrée (batch_size, seq_len, input_dim)
-        Retourne les prédictions concaténées: [speed, sin, cos, exp_1h, exp_2h, exp_3h]
+        Retourne les prédictions concaténées: [speed, sin, cos]
         """
         proj = self.input_proj(x)
         lstm_out, _ = self.lstm(proj)
@@ -143,54 +128,38 @@ class FirePropagationLSTM(nn.Module):
 
         speed_out = self.speed_head(shared)
         dir_raw = self.direction_head(shared)
-        dir_norm = F.normalize(dir_raw, p=2, dim=-1)  # vecteur unitaire (sin, cos)
-        exp_out = self.expansion_head(shared)
+        dir_norm = F.normalize(dir_raw, p=2, dim=-1)
 
-        return torch.cat([speed_out, dir_norm, exp_out], dim=-1)
+        return torch.cat([speed_out, dir_norm], dim=-1)
 
 
 class PropagationMultiTaskLoss(nn.Module):
-    """Fonction de perte multi-tâches combinant régression de vitesse, cohérence angulaire et expansion."""
+    """Fonction de perte combinant régression de vitesse et cohérence angulaire."""
 
-    def __init__(self, speed_weight: float = 1.0, dir_weight: float = 1.5, exp_weight: float = 0.8) -> None:
+    def __init__(self, speed_weight: float = 1.0, dir_weight: float = 1.5) -> None:
         super().__init__()
         self.speed_weight = speed_weight
         self.dir_weight = dir_weight
-        self.exp_weight = exp_weight
-        self.mse = nn.MSELoss()
         self.smooth_l1 = nn.SmoothL1Loss()
 
     def forward(self, preds: torch.Tensor, targets: torch.Tensor) -> Tuple[torch.Tensor, Dict[str, float]]:
-        # Séparation des composantes
         pred_speed = preds[:, 0:1]
         pred_dir = preds[:, 1:3]
-        pred_exp = preds[:, 3:6]
 
         target_speed = targets[:, 0:1]
         target_dir = targets[:, 1:3]
-        target_exp = targets[:, 3:6]
 
-        # Perte de vitesse (Smooth L1 robuste aux rafales extrêmes)
         loss_speed = self.smooth_l1(pred_speed, target_speed)
 
-        # Perte vectorielle directionnelle (Cosine Similarity Loss: 1 - cos(pred, tgt))
         target_dir_norm = F.normalize(target_dir, p=2, dim=-1)
         cos_sim = torch.sum(pred_dir * target_dir_norm, dim=-1)
         loss_dir = torch.mean(1.0 - cos_sim)
 
-        # Perte d'expansion multi-horizons
-        loss_exp = self.mse(pred_exp, target_exp)
-
-        total_loss = (
-            self.speed_weight * loss_speed
-            + self.dir_weight * loss_dir
-            + self.exp_weight * loss_exp
-        )
+        total_loss = self.speed_weight * loss_speed + self.dir_weight * loss_dir
 
         metrics = {
             "loss_speed": float(loss_speed.item()),
             "loss_dir": float(loss_dir.item()),
-            "loss_exp": float(loss_exp.item()),
             "total_loss": float(total_loss.item()),
         }
         return total_loss, metrics
@@ -203,9 +172,8 @@ def save_lstm_model(
     config: Dict[str, Any],
     metrics: Dict[str, Any],
     save_path_pkl: str | Path = "models/fire_propagation_lstm.pkl",
-    save_path_pt: Optional[str | Path] = "models/fire_propagation_lstm.pt",
 ) -> str:
-    """Sauvegarde le modèle complet, scalers, et métadonnées au format .pkl."""
+    """Sauvegarde le modèle complet, scalers et métadonnées au format .pkl."""
     path_pkl = Path(save_path_pkl)
     path_pkl.parent.mkdir(parents=True, exist_ok=True)
 
@@ -224,20 +192,6 @@ def save_lstm_model(
 
     with open(path_pkl, "wb") as f:
         pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
-
-    if save_path_pt:
-        path_pt = Path(save_path_pt)
-        path_pt.parent.mkdir(parents=True, exist_ok=True)
-        torch.save(
-            {
-                "model_state": model.state_dict(),
-                "config": config,
-                "x_scaler": x_scaler.to_dict(),
-                "y_scaler": y_scaler.to_dict(),
-                "metrics": metrics,
-            },
-            path_pt,
-        )
 
     print(f"Modèle LSTM sauvegardé avec succès dans : {path_pkl.resolve()}")
     return str(path_pkl.resolve())
@@ -304,7 +258,6 @@ def train_propagation_lstm(
     print("=" * 70)
     print(f"Périphérique d'exécution : {device}")
 
-    # 1. Préparation des séries temporelles
     X_train, Y_train, X_val, Y_val, x_scaler, y_scaler = prepare_datasets_for_training(
         csv_source=csv_source,
         sequence_length=sequence_length,
@@ -364,7 +317,6 @@ def train_propagation_lstm(
         scheduler.step()
         train_loss = train_loss_acc / len(train_ds)
 
-        # Validation
         model.eval()
         val_loss_acc = 0.0
         val_preds_list: List[np.ndarray] = []
@@ -386,7 +338,6 @@ def train_propagation_lstm(
         val_preds_all = np.concatenate(val_preds_list, axis=0)
         val_targets_all = np.concatenate(val_targets_list, axis=0)
 
-        # Dénormalisation des prédictions pour calcul des métriques réelles (km/h et degrés)
         pred_denorm = y_scaler.inverse_transform(val_preds_all)
         target_denorm = y_scaler.inverse_transform(val_targets_all)
 
@@ -394,7 +345,6 @@ def train_propagation_lstm(
         true_speed = target_denorm[:, 0]
         speed_mae = float(np.mean(np.abs(pred_speed - true_speed)))
 
-        # Erreur angulaire absolue en degrés
         pred_angles = np.array([sin_cos_to_angle(s, c) for s, c in pred_denorm[:, 1:3]])
         true_angles = np.array([sin_cos_to_angle(s, c) for s, c in target_denorm[:, 1:3]])
         diff = np.abs(pred_angles - true_angles)
@@ -431,7 +381,6 @@ def train_propagation_lstm(
         "history": history,
     }
 
-    # Sauvegarde du fichier métriques JSON
     metrics_path = Path(metrics_json_path)
     metrics_path.parent.mkdir(parents=True, exist_ok=True)
     with open(metrics_path, "w", encoding="utf-8") as f:
